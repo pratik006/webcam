@@ -1,0 +1,14 @@
+server.port: 8090
+
+#server:
+#  ssl:
+#    key-store: classpath:keystore.jks
+#    key-store-password: password
+#    key-store-type: jks
+#    key-alias: tomcat
+#    key-password: password
+#  port: 9443
+
+logging.level.org.springframework:
+  web.socket.messaging: ERROR
+  messaging: ERROR
