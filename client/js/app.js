@@ -5,6 +5,7 @@ window.addEventListener("load", evt => {
 (function() {
     const SERVER_URL = 'http://192.168.0.108:8090/web-conference';
     const TOPIC_NAME = '/topic/public';
+    const VIDEO_TOPIC = '/topic/video';
     const CHUNK_SIZE = 512;
     var stompClient = null;
     const sender = document.querySelector("#name");
@@ -23,21 +24,85 @@ window.addEventListener("load", evt => {
     var videoOn = false;
     var gStream;
     var messageNumber = 0;
+    var mediaSource = null;
 
     const appContext = {
         connected: false,
         users: [],
-        video_users: []
+        video_users: [],
+        users: new Object()
     };
+    const mimeCodec = "video/webm; codecs=vorbis,vp8";
+
+    function attachMediaSource(videoElem, sessionId) {
+        const mediaSource = new MediaSource();
+        appContext.users[sessionId].mediaSource = mediaSource;
+        var mediaSourceBuffer;
+        mediaSource.addEventListener('sourceopen', evt => {
+            console.log("source opened "+videoElem.id);
+            const sourceBuffer = mediaSource.addSourceBuffer(mimeCodec);
+            appContext.users[sessionId].sourceBuffer = sourceBuffer;
+            
+            if(appContext.users[sessionId].chunks) {
+                var blob = appContext.users[sessionId].chunks.pop();
+                blob.arrayBuffer().then(data => sourceBuffer.appendBuffer(data));
+            }
+        }, false);
+        mediaSource.addEventListener('sourceclose', evt => console.log("source closed "+sessionId));
+        mediaSource.addEventListener('sourceended', evt => console.log("source ended "+sessionId));
+        videoElem.src = URL.createObjectURL(mediaSource);
+        videoElem.play().then(evt => {
+            console.log("playing "+this);
+            //var arrayBuffer = _base64ToArrayBuffer(videoMsg.content.split(",")[1]);
+            //appContext.users[videoMsg.sessionId].sourceBuffer.appendBuffer(arrayBuffer);
+        }).catch(err => console.log("error while playing "+videoElem));
+        return mediaSource;
+    }
+
+    const otherVideo = document.querySelector("#otherVideo");
+    myVideo.play().then(evt => {
+        console.log("onplay myvideo");
+        var cStream = myVideo.mozCaptureStream();
+        //otherVideo.srcObject = myVideo.captureStream();
+        var recordedChunks = [];
+        var options = { mimeType: "video/webm; codecs=vp8" };
+        var otherVideoPlaying = false;
+        appContext.users["test"] ={};
+        myMediaSource = attachMediaSource(otherVideo, "test");
+
+        mediaRecorder = new MediaRecorder(cStream, options);
+        mediaRecorder.ondataavailable = function(event) {
+            if (event.data.size > 0) {
+                const reader = new FileReader();
+                var temp = [];
+                temp.push(event.data);
+                reader.readAsDataURL(new Blob(temp, {type: "video/webm"})); 
+                reader.onloadend = function() {
+                    console.log("sending "+reader.result.substr(0, 50));
+                    //stompClient.send("/app/binary", {}, reader.result);
+                    temp = [];
+                }
+
+                recordedChunks.push(event.data);
+                if (appContext.users["test"].sourceBuffer) {
+                    const blob = new Blob(recordedChunks, {type: "video/webm"})
+                    blob.arrayBuffer().then(data => appContext.users["test"].sourceBuffer.appendBuffer(data));
+                    recordedChunks = [];
+                }
+            }
+        };
+        mediaRecorder.start(1000);
+    });
 
     btnStartVideo.addEventListener('click', evt => {
+        navigator.getUserMedia = navigator.getUserMedia || navigator.webkitGetUserMedia || navigator.mozGetUserMedia || navigator.msGetUserMedia;
         navigator.mediaDevices.getUserMedia(constraints).then(stream => {
             myVideo.classList.remove('d-none');
             myVideo.classList.add('d-block');
             gStream = stream;
             myVideo.srcObject = stream;
             myVideo.play();
-            console.log(stream);
+
             videoOn = true;
             btnStartVideo.classList.remove('d-block');
             btnStartVideo.classList.add('d-none');
@@ -79,12 +144,12 @@ window.addEventListener("load", evt => {
 
     var constraints = {
         video: true,
-        audio: true
+        audio: false
     }
 
     setInterval(() => {
-        drawCanvas();
-        readCanvas();
+        //drawCanvas();
+        //readCanvas();
     }, 80);
 
     function drawCanvas() {
@@ -123,9 +188,14 @@ window.addEventListener("load", evt => {
         var socket = new SockJS(SERVER_URL);
         stompClient = Stomp.over(socket);
         var messageBin = [];
+        var vidBin = [];
         stompClient.connect({'login': sender.value}, function (frame) {
             setConnected(true);
             console.log('Connected: ' + frame);
+            stompClient.subscribe(VIDEO_TOPIC, msg => {
+                const videoMsg = JSON.parse(msg.body);
+                handleVideoMessage(videoMsg);
+            });
             stompClient.subscribe(TOPIC_NAME, msg => {
                 const chatMsg = JSON.parse(msg.body);
                 if (chatMsg.type == "VIDEO_CONNECT" && chatMsg.sender != sender.value) {
@@ -176,6 +246,40 @@ window.addEventListener("load", evt => {
                 }
             });
         });
+    }
+
+    function handleVideoMessage(videoMsg) {
+        //console.log("video message: "+videoMsg.sender+" "+videoMsg.sessionId);
+        console.log("receiving data: "+videoMsg.content.substring(0,50)+" len: "+videoMsg.content.length);
+
+        if (!appContext.video_users.includes(videoMsg.sessionId)) {
+            appContext.users[videoMsg.sessionId] = {};
+            appContext.users[videoMsg.sessionId].chunks = [];
+            appContext.users[videoMsg.sessionId].chunks.push(_base64ToArrayBuffer(videoMsg.content));
+            appContext.video_users.push(videoMsg.sessionId);
+            document.querySelector('.videoContainer > div').innerHTML += createVideoWindow(videoMsg.sessionId, videoMsg.sender);
+            const videoImg = document.querySelector('#videoImg_'+videoMsg.sessionId);
+            attachMediaSource(videoImg, videoMsg.sessionId);            
+            return;
+        }
+
+        const videoImg = document.querySelector('#videoImg_'+videoMsg.sessionId);
+        if (!videoImg)
+            return;
+
+        
+        var blob = _base64ToArrayBuffer(videoMsg.content);
+        blob.arrayBuffer().then(data => appContext.users[videoMsg.sessionId].sourceBuffer.appendBuffer(data));
+    }
+
+    function _base64ToArrayBuffer(base64) {
+        var binary_string = window.atob(base64.split(",")[1]?base64.split(",")[1]:base64);
+        var len = binary_string.length;
+        var bytes = new Uint8Array(len);
+        for (var i = 0; i < len; i++) {
+            bytes[i] = binary_string.charCodeAt(i);
+        }
+        return new Blob(bytes, {type: "video/webm"});
     }
 
     function setConnected(value) {
@@ -229,11 +333,11 @@ window.addEventListener("load", evt => {
         return `
         <div class="card" id="serverCard_${sessionId}">
             <div class="card-header">
-            ${username}
+            ${username?username:sessionId}
             </div>
             <div class="card-body">
                 <span class="text-right text-muted float-right"></span>
-                <img id="serverImg_${sessionId}"></img>
+                <video id="videoImg_${sessionId}" autoplay></video>
             </div>
       </div>`;
     }
