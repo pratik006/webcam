@@ -12,7 +12,7 @@ public class ChatMessage extends AbstractMessage {
     }
 
     public ChatMessage(MessageType messageType) {
-        this.type = type;
+        this.type = messageType;
     }
 
     public MessageType getType() {

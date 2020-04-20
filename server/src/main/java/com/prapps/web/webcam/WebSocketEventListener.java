@@ -2,6 +2,7 @@ package com.prapps.web.webcam;
 
 import com.prapps.web.webcam.model.ChatMessage;
 import com.prapps.web.webcam.model.MessageType;
+import com.prapps.web.webcam.model.VideoMessage;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -18,6 +19,8 @@ public class WebSocketEventListener {
     private static final Logger LOG = LoggerFactory.getLogger(WebSocketEventListener.class);
     @Autowired
     private SimpMessageSendingOperations sendingOperations;
+    @Autowired
+    SessionCache sessionCache;
 
     @EventListener
     public void handleWebSocketConnectListener(final SessionConnectedEvent evt) {
@@ -27,6 +30,11 @@ public class WebSocketEventListener {
         chatMessage.setSessionId(headerAccessor.getSessionId());
         //chatMessage.setSender(username);
         sendingOperations.convertAndSend("/topic/public", chatMessage);
+        sessionCache.getEntries().stream().forEach(entry -> {
+            if (!headerAccessor.getSessionId().equals(entry.getKey())) {
+                sendingOperations.convertAndSend("/topic/public", entry.getValue());
+            }
+        });
         LOG.info("connected: "+headerAccessor.getSessionId());
     }
 
@@ -35,8 +43,9 @@ public class WebSocketEventListener {
         final StompHeaderAccessor headerAccessor = StompHeaderAccessor.wrap(evt.getMessage());
         final String username = (String) headerAccessor.getSessionAttributes().get("username");
         final ChatMessage chatMessage = new ChatMessage(MessageType.DISCONNECT);
-        chatMessage.setSender(headerAccessor.getSessionId());
+        chatMessage.setSessionId(headerAccessor.getSessionId());
         sendingOperations.convertAndSend("/topic/public", chatMessage);
+        sessionCache.remove(headerAccessor.getSessionId());
         LOG.info("disconnected "+headerAccessor.getSessionId());
     }
 }

@@ -4,6 +4,7 @@ window.addEventListener("load", evt => {
 
 (function() {
     const SERVER_URL = 'http://192.168.0.108:8090/web-conference';
+    const REST_URL = 'http://192.168.0.108:8090/rest/';
     const TOPIC_NAME = '/topic/public';
     const VIDEO_TOPIC = '/topic/video';
     const CHUNK_SIZE = 512;
@@ -43,10 +44,12 @@ window.addEventListener("load", evt => {
             console.log("source opened "+videoElem.id);
             const sourceBuffer = mediaSource.addSourceBuffer(mimeCodec);
             appContext.users[sessionId].sourceBuffer = sourceBuffer;
-            
+            /*appContext.users[sessionId].chunks.forEach(chunkBlob => {
+                chunkBlob.arrayBuffer().then(data => sourceBuffer.appendBuffer(data));
+            });*/
             if(appContext.users[sessionId].chunks) {
-                var blob = appContext.users[sessionId].chunks.pop();
-                blob.arrayBuffer().then(data => sourceBuffer.appendBuffer(data));
+                appContext.users[sessionId].chunks[0].arrayBuffer()
+                .then(data => sourceBuffer.appendBuffer(data));
             }
         }, false);
         mediaSource.addEventListener('sourceclose', evt => console.log("source closed "+sessionId));
@@ -65,12 +68,11 @@ window.addEventListener("load", evt => {
         var cStream = myVideo.mozCaptureStream ? myVideo.mozCaptureStream() : myVideo.captureStream();
         //otherVideo.srcObject = myVideo.captureStream();
         var recordedChunks = [];
-        appContext.users["test"] ={};
-        myMediaSource = attachMediaSource(otherVideo, "test");
+        /*appContext.users["test"] ={};
+        myMediaSource = attachMediaSource(otherVideo, "test");*/
 
         mediaRecorder = new MediaRecorder(cStream, { mimeType: mimeCodec });
-        mediaRecorder.ondataavailable = function(event) {
-            console.log(event.data);
+        mediaRecorder.ondataavailable = function(event) {console.log(event)
             if (event.data.size > 0) {
                 blobToBase64(event.data, function(base64) {
                     //var blob = b64ToBlob(base64);
@@ -117,11 +119,12 @@ window.addEventListener("load", evt => {
         btnStartVideo.classList.add('d-block');
         myVideo.classList.remove('d-block');
         myVideo.classList.add('d-none');
+        mediaRecorder.stop();
 
         if (appContext.connected == true) {
             stompClient.send("/app/user", {}, JSON.stringify({
                 'type': 'VIDEO_DISCONNECT', 
-                'sender':  sender.value,
+                'sessionId':  appContext.sessionId,
                 'content': 'video disconnected'
              }));
         }    
@@ -145,33 +148,6 @@ window.addEventListener("load", evt => {
         context.drawImage(myVideo, 0, 0, canvas.width, canvas.height);
     }
 
-    function readCanvas() {
-        if (videoOn && stompClient) {
-            var canvasData = canvas.toDataURL('image/jpeg', 0.5);
-            var temp = canvasData.split(",")[1];
-            // console.log("canvas start:"+temp.substr(0, 10)+"..."+temp.substr(temp.length-101, 100));
-            // var decodedAsString = atob(canvasData.split(",")[1]);
-            // var charArray=[];
-            // for (var i=0;i<decodedAsString.length;i++) {
-            //     charArray.push(decodedAsString.charAt(i));
-            // }
-            //serverImg.setAttribute('src', "data:image/jpeg;base64,"+temp);
-            //console.log(stompClient);
-            var matches = temp.match(/.{1,512}/g);
-            matches.forEach((s, index) => {
-                stompClient.send("/app/user", {}, JSON.stringify({
-                    'messageNumber': messageNumber,
-                    'type': 'VIDEO', 
-                    'sender':  sender.value,
-                    'content': s,
-                    'partNumber': index,
-                    'partCount': matches.length
-                 }));
-            });
-            messageNumber++;
-        }
-    }
-
     function connect() {
         var socket = new SockJS(SERVER_URL);
         stompClient = Stomp.over(socket);
@@ -183,81 +159,75 @@ window.addEventListener("load", evt => {
             appContext.sessionId = sessionId;
             stompClient.subscribe(VIDEO_TOPIC, msg => {
                 const videoMsg = JSON.parse(msg.body);
-                if (appContext.sessionId != videoMsg.sessionId) {
+                console.log(appContext.users[videoMsg.sessionId])
+                if (appContext.sessionId != videoMsg.sessionId && appContext.users[videoMsg.sessionId].disconnect != true) {
                     handleVideoMessage(videoMsg);    
                 }
             });
             stompClient.subscribe(TOPIC_NAME, msg => {
                 const chatMsg = JSON.parse(msg.body);
-                if (chatMsg.type == "VIDEO_CONNECT" && chatMsg.sender != sender.value) {
-                    appContext.video_users.push(chatMsg.sessionId);
+                if (chatMsg.type == "VIDEO_CONNECT" && chatMsg.sessionId != appContext.sessionId) {
+                    appContext.users[chatMsg.sessionId].disconnect = false;
                     console.log("video user connected."+chatMsg.sender+" sessionId: "+chatMsg.sessionId);
-                    document.querySelector('.videoContainer > div').innerHTML += createVideoWindow(chatMsg.sessionId, chatMsg.sender);
-                } else if (chatMsg.type == "VIDEO_DISCONNECT" && chatMsg.sender != sender.value) {
-                    delete appContext.video_users[chatMsg.sessionId];
-                    console.log("video user disconnected."+chatMsg.sender);
-                    const videoWindow = document.querySelector('#serverCard_'+chatMsg.sessionId);
-                    videoWindow.parentNode.removeChild(videoWindow);
-                } else if (chatMsg.type == "VIDEO" && chatMsg.sender != sender.value) {
-                    if (!appContext.video_users.includes(chatMsg.sessionId)) {
-                        appContext.video_users.push(chatMsg.sessionId);
-                        document.querySelector('.videoContainer > div').innerHTML += createVideoWindow(chatMsg.sessionId, chatMsg.sender);
-                    }
-                    const serverImg = document.querySelector('#serverImg_'+chatMsg.sessionId);
-                    if (!serverImg)
-                        return;
-
-                    if (!messageBin[chatMsg.messageNumber]) {
-                        messageBin[chatMsg.messageNumber] = [];
-                    }
-                    messageBin[chatMsg.messageNumber][chatMsg.partNumber] = {};
-                    messageBin[chatMsg.messageNumber][chatMsg.partNumber].content = chatMsg.content;
-                    if (messageBin[chatMsg.messageNumber].length == chatMsg.partCount) {
-                        messageBin[chatMsg.messageNumber].sort();
-                        var buf = "";
-                        messageBin[chatMsg.messageNumber].forEach(item => {
-                            buf += item.content;
-                        });
-                        //console.log("buf len"+buf.length+" partLen: "+messageBin[chatMsg.messageNumber].length);
-                        var encoded = buf;//btoa(buf);
-                        //console.log(encoded.substr(0,10)+"..."+encoded.substr(encoded.length-101,100));
-                        serverImg.setAttribute('src', "data:image/jpeg;base64,"+encoded);
-                        messageBin[chatMsg.messageNumber] = null;
-                    }
+                    //document.querySelector('.videoContainer > div').innerHTML += createVideoWindow(chatMsg.sessionId, chatMsg.sender);
+                } else if (chatMsg.type == "VIDEO_DISCONNECT" && chatMsg.sessionId != appContext.sessionId) {
+                    appContext.users[chatMsg.sessionId].disconnect = true;
+                    appContext.users[chatMsg.sessionId].mediaSource.endOfStream();
+                    document.querySelector('#serverCard_'+chatMsg.sessionId).remove();
+                    delete appContext.users[chatMsg.sessionId].videoImg;
+                    console.log("video user disconnected."+chatMsg.sessionId);
                 } else if(chatMsg.type == "CHAT") {
                     showMsg(chatMsg);
                 } else if(chatMsg.type == "CONNECT") {
                     console.log("connected "+chatMsg.sessionId);
-                    appContext.users.push(chatMsg.sessionId);
-                    console.log(appContext.users);
+                    appContext.users[chatMsg.sessionId] = {};
                 } else if(chatMsg.type == "DISCONNECT") {
                     console.log("disconnected "+chatMsg.sessionId);
                     delete appContext.users[chatMsg.sessionId];
-                    console.log(appContext.users);
                 }
             });
         });
     }
 
     function handleVideoMessage(videoMsg) {
-        if (!appContext.video_users.includes(videoMsg.sessionId)) {
-            appContext.users[videoMsg.sessionId] = {};
-            appContext.users[videoMsg.sessionId].chunks = [];
-            appContext.users[videoMsg.sessionId].chunks.push(b64ToBlob(videoMsg.content));
-            appContext.video_users.push(videoMsg.sessionId);
+        if (!appContext.users[videoMsg.sessionId].videoSession) {console.log("111")
+            fetch(REST_URL+videoMsg.sessionId)
+                .then(resp => resp.json())
+                .then(fMsg => {
+                    appContext.users[videoMsg.sessionId].videoSession = true;
+                    appContext.users[videoMsg.sessionId].chunks = [];
+                    appContext.users[videoMsg.sessionId].chunks.push(b64ToBlob(fMsg.content));
+                    appContext.users[videoMsg.sessionId].chunks.push(b64ToBlob(videoMsg.content));
+                    document.querySelector('.videoContainer > div').innerHTML += createVideoWindow(videoMsg.sessionId, videoMsg.sender);
+                    const videoImg = document.querySelector('#videoImg_'+videoMsg.sessionId);
+                    appContext.users[videoMsg.sessionId].videoImg = videoImg;
+                    attachMediaSource(videoImg, videoMsg.sessionId);
+                });
+            return;
+        } else if (!appContext.users[videoMsg.sessionId].videoImg) {
+            console.log("recreate video layout ");
             document.querySelector('.videoContainer > div').innerHTML += createVideoWindow(videoMsg.sessionId, videoMsg.sender);
             const videoImg = document.querySelector('#videoImg_'+videoMsg.sessionId);
-            attachMediaSource(videoImg, videoMsg.sessionId);            
+            appContext.users[videoMsg.sessionId].videoImg = videoImg;
+            attachMediaSource(videoImg, videoMsg.sessionId);
             return;
+        } else {
+            console.log("exisging ")
+            const videoImg = appContext.users[videoMsg.sessionId].videoImg;//document.querySelector('#videoImg_'+videoMsg.sessionId);
+            if (!videoImg)
+                return;
+    
+            
+            var blob = b64ToBlob(videoMsg.content);
+            blob.arrayBuffer().then(data => {
+                if (appContext.users[videoMsg.sessionId]) {//make sure other user has not closed the video
+                    appContext.users[videoMsg.sessionId].sourceBuffer.appendBuffer(data);
+                }
+            });
         }
 
-        const videoImg = document.querySelector('#videoImg_'+videoMsg.sessionId);
-        if (!videoImg)
-            return;
 
         
-        var blob = b64ToBlob(videoMsg.content);
-        blob.arrayBuffer().then(data => appContext.users[videoMsg.sessionId].sourceBuffer.appendBuffer(data));
     }
 
     function b64ToBlob(base64) {

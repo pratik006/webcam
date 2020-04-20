@@ -5,6 +5,7 @@ import com.prapps.web.webcam.model.MessageType;
 import com.prapps.web.webcam.model.VideoMessage;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.messaging.handler.annotation.MessageMapping;
 import org.springframework.messaging.handler.annotation.Payload;
 import org.springframework.messaging.handler.annotation.SendTo;
@@ -20,6 +21,9 @@ import java.time.LocalDateTime;
 @Controller
 public class ChatController {
     private static final Logger LOG = LoggerFactory.getLogger(ChatController.class);
+
+    @Autowired
+    SessionCache sessionCache;
 
     @CrossOrigin(origins = "*")
     @MessageMapping("/user")
@@ -40,6 +44,10 @@ public class ChatController {
         videoMessage.setTime(LocalDateTime.now().toString());
         videoMessage.setSessionId(headerAccessor.getSessionId());
         videoMessage.setContent(new String(buf));
+        if (!sessionCache.containsKey(headerAccessor.getSessionId())) {
+            videoMessage.setMessageNumber(1);
+            sessionCache.putIfAbsent(headerAccessor.getSessionId(), videoMessage);
+        }
         return videoMessage;
     }
 
