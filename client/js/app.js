@@ -13,6 +13,7 @@ window.addEventListener("load", evt => {
     const btnConnect = document.querySelector("#connect");
     const btnDisconnect = document.querySelector("#disconnect");
     const btnSend = document.querySelector("#send");
+    const otherVideo = document.querySelector("#otherVideo");
     const serverImg = document.querySelector("#serverImg");
 
     const btnStartVideo = document.querySelector("#startVideo");
@@ -32,7 +33,7 @@ window.addEventListener("load", evt => {
         video_users: [],
         users: new Object()
     };
-    const mimeCodec = "video/webm; codecs=vorbis,vp8";
+    const mimeCodec = "video/webm; codecs=vp8";
 
     function attachMediaSource(videoElem, sessionId) {
         const mediaSource = new MediaSource();
@@ -53,42 +54,29 @@ window.addEventListener("load", evt => {
         videoElem.src = URL.createObjectURL(mediaSource);
         videoElem.play().then(evt => {
             console.log("playing "+this);
-            //var arrayBuffer = _base64ToArrayBuffer(videoMsg.content.split(",")[1]);
+            //var arrayBuffer = b64ToBlob(videoMsg.content.split(",")[1]);
             //appContext.users[videoMsg.sessionId].sourceBuffer.appendBuffer(arrayBuffer);
         }).catch(err => console.log("error while playing "+videoElem));
         return mediaSource;
     }
 
-    const otherVideo = document.querySelector("#otherVideo");
+    
     myVideo.play().then(evt => {
-        console.log("onplay myvideo");
-        var cStream = myVideo.mozCaptureStream();
+        var cStream = myVideo.mozCaptureStream ? myVideo.mozCaptureStream() : myVideo.captureStream();
         //otherVideo.srcObject = myVideo.captureStream();
         var recordedChunks = [];
-        var options = { mimeType: "video/webm; codecs=vp8" };
-        var otherVideoPlaying = false;
         appContext.users["test"] ={};
         myMediaSource = attachMediaSource(otherVideo, "test");
 
-        mediaRecorder = new MediaRecorder(cStream, options);
+        mediaRecorder = new MediaRecorder(cStream, { mimeType: mimeCodec });
         mediaRecorder.ondataavailable = function(event) {
+            console.log(event.data);
             if (event.data.size > 0) {
-                const reader = new FileReader();
-                var temp = [];
-                temp.push(event.data);
-                reader.readAsDataURL(new Blob(temp, {type: "video/webm"})); 
-                reader.onloadend = function() {
-                    console.log("sending "+reader.result.substr(0, 50));
-                    //stompClient.send("/app/binary", {}, reader.result);
-                    temp = [];
-                }
-
-                recordedChunks.push(event.data);
-                if (appContext.users["test"].sourceBuffer) {
-                    const blob = new Blob(recordedChunks, {type: "video/webm"})
-                    blob.arrayBuffer().then(data => appContext.users["test"].sourceBuffer.appendBuffer(data));
-                    recordedChunks = [];
-                }
+                blobToBase64(event.data, function(base64) {
+                    //var blob = b64ToBlob(base64);
+                    //blob.arrayBuffer().then(data => appContext.users["test"].sourceBuffer.appendBuffer(data));
+                    stompClient.send("/app/binary", {}, base64);
+                });
             }
         };
         mediaRecorder.start(1000);
@@ -191,10 +179,13 @@ window.addEventListener("load", evt => {
         var vidBin = [];
         stompClient.connect({'login': sender.value}, function (frame) {
             setConnected(true);
-            console.log('Connected: ' + frame);
+            const sessionId = socket._transport.url.substr(SERVER_URL.length).split("/")[1]; 
+            appContext.sessionId = sessionId;
             stompClient.subscribe(VIDEO_TOPIC, msg => {
                 const videoMsg = JSON.parse(msg.body);
-                handleVideoMessage(videoMsg);
+                if (appContext.sessionId != videoMsg.sessionId) {
+                    handleVideoMessage(videoMsg);    
+                }
             });
             stompClient.subscribe(TOPIC_NAME, msg => {
                 const chatMsg = JSON.parse(msg.body);
@@ -249,13 +240,10 @@ window.addEventListener("load", evt => {
     }
 
     function handleVideoMessage(videoMsg) {
-        //console.log("video message: "+videoMsg.sender+" "+videoMsg.sessionId);
-        console.log("receiving data: "+videoMsg.content.substring(0,50)+" len: "+videoMsg.content.length);
-
         if (!appContext.video_users.includes(videoMsg.sessionId)) {
             appContext.users[videoMsg.sessionId] = {};
             appContext.users[videoMsg.sessionId].chunks = [];
-            appContext.users[videoMsg.sessionId].chunks.push(_base64ToArrayBuffer(videoMsg.content));
+            appContext.users[videoMsg.sessionId].chunks.push(b64ToBlob(videoMsg.content));
             appContext.video_users.push(videoMsg.sessionId);
             document.querySelector('.videoContainer > div').innerHTML += createVideoWindow(videoMsg.sessionId, videoMsg.sender);
             const videoImg = document.querySelector('#videoImg_'+videoMsg.sessionId);
@@ -268,18 +256,28 @@ window.addEventListener("load", evt => {
             return;
 
         
-        var blob = _base64ToArrayBuffer(videoMsg.content);
+        var blob = b64ToBlob(videoMsg.content);
         blob.arrayBuffer().then(data => appContext.users[videoMsg.sessionId].sourceBuffer.appendBuffer(data));
     }
 
-    function _base64ToArrayBuffer(base64) {
-        var binary_string = window.atob(base64.split(",")[1]?base64.split(",")[1]:base64);
-        var len = binary_string.length;
-        var bytes = new Uint8Array(len);
-        for (var i = 0; i < len; i++) {
-            bytes[i] = binary_string.charCodeAt(i);
+    function b64ToBlob(base64) {
+        var byteCharacters = window.atob(base64.split(",")[1]?base64.split(",")[1]:base64);
+        const byteNumbers = new Array(byteCharacters.length);
+        for (let i = 0; i < byteCharacters.length; i++) {
+            byteNumbers[i] = byteCharacters.charCodeAt(i);
         }
-        return new Blob(bytes, {type: "video/webm"});
+        const byteArray = new Uint8Array(byteNumbers);
+        return new Blob([byteArray], {type: mimeCodec});
+    }
+
+    function blobToBase64(buf, callback) {
+        const reader = new FileReader();
+        var temp = [];
+        temp.push(buf);
+        reader.readAsDataURL(new Blob(temp, {type: "video/webm"})); 
+        reader.onloadend = function() {
+            callback(reader.result);
+        }
     }
 
     function setConnected(value) {
