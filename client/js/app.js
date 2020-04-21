@@ -18,8 +18,6 @@ window.addEventListener("load", evt => {
 
     const btnStartVideo = document.querySelector("#startVideo");
     const btnStopVideo = document.querySelector("#stopVideo");
-    const myVideo = document.querySelector("#myVideo");
-    var videoOn = false;
     var messageNumber = 0;
     var mediaSource = null;
 
@@ -30,14 +28,6 @@ window.addEventListener("load", evt => {
         users: new Object()
     };
     const mimeCodec = "video/webm; codecs=vp8";
-
-    //document.querySelector("video").addEventListener('play', evt => {console.log("play "+evt.target.id)});
-    //document.querySelector("video").addEventListener('pause', evt => {console.log("pause"+evt.target.id)});
-    document.querySelector("video").addEventListener('playing', evt => {
-        if(evt.target.id == myVideo.id) {
-            startRecording();
-        }
-    });
 
     function attachMediaSource(videoElem, sessionId) {
         const mediaSource = new MediaSource();
@@ -61,12 +51,12 @@ window.addEventListener("load", evt => {
             console.log("playing "+this);
             //var arrayBuffer = b64ToBlob(videoMsg.content.split(",")[1]);
             //appContext.users[videoMsg.sessionId].sourceBuffer.appendBuffer(arrayBuffer);
-        }).catch(err => console.log("error while playing "+videoElem));
+        }).catch(err => console.log("error while playing "+sessionId));
         return mediaSource;
     }
 
     function startRecording() {
-        var stream = myVideo.mozCaptureStream ? myVideo.mozCaptureStream() : myVideo.captureStream();
+        var stream = appContext.myVideo.mozCaptureStream ? appContext.myVideo.mozCaptureStream() : appContext.myVideo.captureStream();
         var recordedChunks = [];
         mediaRecorder = new MediaRecorder(stream, { mimeType: mimeCodec });
         mediaRecorder.ondataavailable = function(event) {
@@ -80,19 +70,33 @@ window.addEventListener("load", evt => {
                 });
             }
         };
+        appContext.mediaRecorder = mediaRecorder;
         mediaRecorder.start(1000);
+        return true;
     }
 
     btnStartVideo.addEventListener('click', evt => {
         navigator.getUserMedia = navigator.getUserMedia || navigator.webkitGetUserMedia || navigator.mozGetUserMedia || navigator.msGetUserMedia;
         navigator.mediaDevices.getUserMedia(constraints).then(stream => {
             appContext.myVideoStream = stream;
-            myVideo.classList.remove('d-none');
-            myVideo.classList.add('d-block');
+            document.querySelector('.videoContainer').insertAdjacentHTML('afterbegin',createVideoWindow("Me", "Me"));
+            const myVideo = document.querySelector('.videoContainer video[id="videoImg_Me"]');
+            myVideo.addEventListener('playing', evt => {
+                console.log("playing "+evt.target.id)
+                if(evt.target.id == appContext.myVideo.id && !appContext.recordingStatus) {
+                    appContext.recordingStatus = startRecording();
+                }
+            });
+            myVideo.addEventListener('pause', evt => {
+                console.log("pause "+evt.target.id)
+                if(evt.target.id == appContext.myVideo.id) {
+                    appContext.myVideo.play();
+                }
+            });
             myVideo.srcObject = stream;
             myVideo.play();
+            appContext.myVideo = myVideo;
 
-            videoOn = true;
             btnStartVideo.classList.remove('d-block');
             btnStartVideo.classList.add('d-none');
             btnStopVideo.classList.remove('d-none');
@@ -108,20 +112,18 @@ window.addEventListener("load", evt => {
         }).catch(err => console.log(err));
     });
     btnStopVideo.addEventListener('click', evt => {
-        myVideo.pause();
+        if (appContext.mediaRecorder.state == "recording") {
+            appContext.mediaRecorder.stop();
+        }
         appContext.myVideoStream.getTracks().forEach(function(track) {
             track.stop();
         });
-        videoOn = false;
+        appContext.myVideo.pause();
+        document.querySelector("#serverCard_Me").parentElement.remove();
         btnStopVideo.classList.remove('d-block');
         btnStopVideo.classList.add('d-none');
         btnStartVideo.classList.remove('d-none');
-        btnStartVideo.classList.add('d-block');
-        myVideo.classList.remove('d-block');
-        myVideo.classList.add('d-none');
-        if (mediaRecorder.state == "recording") {
-            mediaRecorder.stop();
-        }
+        btnStartVideo.classList.add('d-block');      
 
         if (appContext.connected == true) {
             stompClient.send("/app/user", {}, JSON.stringify({
@@ -151,20 +153,32 @@ window.addEventListener("load", evt => {
             appContext.sessionId = sessionId;
             stompClient.subscribe(VIDEO_TOPIC, msg => {
                 const videoMsg = JSON.parse(msg.body);
-                if (appContext.sessionId != videoMsg.sessionId && appContext.users[videoMsg.sessionId].disconnect != true) {
+                if (!appContext.users[videoMsg.sessionId]) {
+                    //incoming user was connected before I was connected
+                    appContext.users[videoMsg.sessionId] = {};
+                }
+                if (appContext.sessionId != videoMsg.sessionId && true != appContext.users[videoMsg.sessionId].disconnect) {
                     handleVideoMessage(videoMsg);    
                 }
             });
             stompClient.subscribe(TOPIC_NAME, msg => {
                 const chatMsg = JSON.parse(msg.body);
-                if (chatMsg.type == "VIDEO_CONNECT" && chatMsg.sessionId != appContext.sessionId) {
+                if (!appContext.users[chatMsg.sessionId]) {
+                    //incoming user was connected before I was connected
+                    appContext.users[chatMsg.sessionId] = {};
+                }
+
+                if (chatMsg.type == "VIDEO_CONNECT" && chatMsg.sessionId != appContext.sessionId) {                    
                     appContext.users[chatMsg.sessionId].disconnect = false;
                     console.log("video user connected."+chatMsg.sender+" sessionId: "+chatMsg.sessionId);
-                    //document.querySelector('.videoContainer > div').innerHTML += createVideoWindow(chatMsg.sessionId, chatMsg.sender);
+                    //document.querySelector('.videoContainer').innerHTML += createVideoWindow(chatMsg.sessionId, chatMsg.sender);
                 } else if (chatMsg.type == "VIDEO_DISCONNECT" && chatMsg.sessionId != appContext.sessionId) {
                     appContext.users[chatMsg.sessionId].disconnect = true;
-                    appContext.users[chatMsg.sessionId].mediaSource.endOfStream();
-                    document.querySelector('#serverCard_'+chatMsg.sessionId).remove();
+                    if (appContext.users[chatMsg.sessionId].mediaSource.readyState == "open") {
+                        appContext.users[chatMsg.sessionId].mediaSource.endOfStream();    
+                    }
+                    
+                    document.querySelector('#serverCard_'+chatMsg.sessionId).parentNode.remove();
                     delete appContext.users[chatMsg.sessionId].videoImg;
                     console.log("video user disconnected."+chatMsg.sessionId);
                 } else if(chatMsg.type == "CHAT") {
@@ -181,7 +195,7 @@ window.addEventListener("load", evt => {
     }
 
     function handleVideoMessage(videoMsg) {
-        if (!appContext.users[videoMsg.sessionId].videoSession) {console.log("111")
+        if (!appContext.users[videoMsg.sessionId].videoSession) {console.log("creating new video session for "+videoMsg.sessionId)
             fetch(REST_URL+videoMsg.sessionId)
                 .then(resp => resp.json())
                 .then(fMsg => {
@@ -189,21 +203,22 @@ window.addEventListener("load", evt => {
                     appContext.users[videoMsg.sessionId].chunks = [];
                     appContext.users[videoMsg.sessionId].chunks.push(b64ToBlob(fMsg.content));
                     appContext.users[videoMsg.sessionId].chunks.push(b64ToBlob(videoMsg.content));
-                    document.querySelector('.videoContainer > div').innerHTML += createVideoWindow(videoMsg.sessionId, videoMsg.sender);
+                    document.querySelector('.videoContainer').insertAdjacentHTML('beforeend', createVideoWindow(videoMsg.sessionId, videoMsg.sender));
                     const videoImg = document.querySelector('#videoImg_'+videoMsg.sessionId);
                     appContext.users[videoMsg.sessionId].videoImg = videoImg;
                     attachMediaSource(videoImg, videoMsg.sessionId);
                 });
             return;
-        } else if (!appContext.users[videoMsg.sessionId].videoImg) {
+        } else if (!appContext.users[videoMsg.sessionId].videoImg 
+            && !document.querySelector('.videoContainer').querySelector('#videoImg_'+videoMsg.sessionId)) {
             console.log("recreate video layout ");
-            document.querySelector('.videoContainer > div').innerHTML += createVideoWindow(videoMsg.sessionId, videoMsg.sender);
+            document.querySelector('.videoContainer').insertAdjacentHTML('beforeend', createVideoWindow(videoMsg.sessionId, videoMsg.sender));
             const videoImg = document.querySelector('#videoImg_'+videoMsg.sessionId);
             appContext.users[videoMsg.sessionId].videoImg = videoImg;
             attachMediaSource(videoImg, videoMsg.sessionId);
             return;
         } else {
-            console.log("exisging ")
+            console.log("video contd.. ");
             const videoImg = appContext.users[videoMsg.sessionId].videoImg;//document.querySelector('#videoImg_'+videoMsg.sessionId);
             if (!videoImg)
                 return;
@@ -290,14 +305,16 @@ window.addEventListener("load", evt => {
 
     function createVideoWindow(sessionId, username) {
         return `
-        <div class="card" id="serverCard_${sessionId}">
-            <div class="card-header">
-            ${username?username:sessionId}
-            </div>
-            <div class="card-body">
-                <span class="text-right text-muted float-right"></span>
-                <video id="videoImg_${sessionId}" autoplay></video>
-            </div>
+        <div class="col-xs-12 col-sm-12 col-md-4 col-lg-4">
+            <div class="card" id="serverCard_${sessionId}">
+                <div class="card-header">
+                ${username?username:sessionId}
+                </div>
+                <div class="card-body">
+                    <span class="text-right text-muted float-right"></span>
+                    <video id="videoImg_${sessionId}" ></video>
+                </div>
+        </div>
       </div>`;
     }
 
