@@ -7,7 +7,6 @@ window.addEventListener("load", evt => {
     const REST_URL = 'http://192.168.0.108:8090/rest/';
     const TOPIC_NAME = '/topic/public';
     const VIDEO_TOPIC = '/topic/video';
-    const CHUNK_SIZE = 512;
     var stompClient = null;
     const sender = document.querySelector("#name");
     const content = document.querySelector("#content");
@@ -20,11 +19,7 @@ window.addEventListener("load", evt => {
     const btnStartVideo = document.querySelector("#startVideo");
     const btnStopVideo = document.querySelector("#stopVideo");
     const myVideo = document.querySelector("#myVideo");
-    const canvas = document.querySelector("canvas");
-    const img = document.querySelector("img");
-    const context = canvas.getContext('2d');
     var videoOn = false;
-    var gStream;
     var messageNumber = 0;
     var mediaSource = null;
 
@@ -36,12 +31,19 @@ window.addEventListener("load", evt => {
     };
     const mimeCodec = "video/webm; codecs=vp8";
 
+    //document.querySelector("video").addEventListener('play', evt => {console.log("play "+evt.target.id)});
+    //document.querySelector("video").addEventListener('pause', evt => {console.log("pause"+evt.target.id)});
+    document.querySelector("video").addEventListener('playing', evt => {
+        if(evt.target.id == myVideo.id) {
+            startRecording();
+        }
+    });
+
     function attachMediaSource(videoElem, sessionId) {
         const mediaSource = new MediaSource();
         appContext.users[sessionId].mediaSource = mediaSource;
         var mediaSourceBuffer;
         mediaSource.addEventListener('sourceopen', evt => {
-            console.log("source opened "+videoElem.id);
             const sourceBuffer = mediaSource.addSourceBuffer(mimeCodec);
             appContext.users[sessionId].sourceBuffer = sourceBuffer;
             /*appContext.users[sessionId].chunks.forEach(chunkBlob => {
@@ -63,33 +65,30 @@ window.addEventListener("load", evt => {
         return mediaSource;
     }
 
-    
-    myVideo.play().then(evt => {
-        var cStream = myVideo.mozCaptureStream ? myVideo.mozCaptureStream() : myVideo.captureStream();
-        //otherVideo.srcObject = myVideo.captureStream();
+    function startRecording() {
+        var stream = myVideo.mozCaptureStream ? myVideo.mozCaptureStream() : myVideo.captureStream();
         var recordedChunks = [];
-        /*appContext.users["test"] ={};
-        myMediaSource = attachMediaSource(otherVideo, "test");*/
-
-        mediaRecorder = new MediaRecorder(cStream, { mimeType: mimeCodec });
-        mediaRecorder.ondataavailable = function(event) {console.log(event)
+        mediaRecorder = new MediaRecorder(stream, { mimeType: mimeCodec });
+        mediaRecorder.ondataavailable = function(event) {
             if (event.data.size > 0) {
                 blobToBase64(event.data, function(base64) {
                     //var blob = b64ToBlob(base64);
                     //blob.arrayBuffer().then(data => appContext.users["test"].sourceBuffer.appendBuffer(data));
-                    stompClient.send("/app/binary", {}, base64);
+                    if (appContext.connected) {
+                        stompClient.send("/app/binary", {}, base64);
+                    }
                 });
             }
         };
         mediaRecorder.start(1000);
-    });
+    }
 
     btnStartVideo.addEventListener('click', evt => {
         navigator.getUserMedia = navigator.getUserMedia || navigator.webkitGetUserMedia || navigator.mozGetUserMedia || navigator.msGetUserMedia;
         navigator.mediaDevices.getUserMedia(constraints).then(stream => {
+            appContext.myVideoStream = stream;
             myVideo.classList.remove('d-none');
             myVideo.classList.add('d-block');
-            gStream = stream;
             myVideo.srcObject = stream;
             myVideo.play();
 
@@ -109,7 +108,8 @@ window.addEventListener("load", evt => {
         }).catch(err => console.log(err));
     });
     btnStopVideo.addEventListener('click', evt => {
-        gStream.getTracks().forEach(function(track) {
+        myVideo.pause();
+        appContext.myVideoStream.getTracks().forEach(function(track) {
             track.stop();
         });
         videoOn = false;
@@ -119,7 +119,9 @@ window.addEventListener("load", evt => {
         btnStartVideo.classList.add('d-block');
         myVideo.classList.remove('d-block');
         myVideo.classList.add('d-none');
-        mediaRecorder.stop();
+        if (mediaRecorder.state == "recording") {
+            mediaRecorder.stop();
+        }
 
         if (appContext.connected == true) {
             stompClient.send("/app/user", {}, JSON.stringify({
@@ -138,16 +140,6 @@ window.addEventListener("load", evt => {
         audio: false
     }
 
-    setInterval(() => {
-        //drawCanvas();
-        //readCanvas();
-    }, 80);
-
-    function drawCanvas() {
-        //console.log(video.height+" "+video.width);
-        context.drawImage(myVideo, 0, 0, canvas.width, canvas.height);
-    }
-
     function connect() {
         var socket = new SockJS(SERVER_URL);
         stompClient = Stomp.over(socket);
@@ -159,7 +151,6 @@ window.addEventListener("load", evt => {
             appContext.sessionId = sessionId;
             stompClient.subscribe(VIDEO_TOPIC, msg => {
                 const videoMsg = JSON.parse(msg.body);
-                console.log(appContext.users[videoMsg.sessionId])
                 if (appContext.sessionId != videoMsg.sessionId && appContext.users[videoMsg.sessionId].disconnect != true) {
                     handleVideoMessage(videoMsg);    
                 }
