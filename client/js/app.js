@@ -13,13 +13,13 @@ window.addEventListener("load", evt => {
     const btnConnect = document.querySelector("#connect");
     const btnDisconnect = document.querySelector("#disconnect");
     const btnSend = document.querySelector("#send");
-    const otherVideo = document.querySelector("#otherVideo");
-    const serverImg = document.querySelector("#serverImg");
 
     const btnStartVideo = document.querySelector("#startVideo");
     const btnStopVideo = document.querySelector("#stopVideo");
-    var messageNumber = 0;
-    var mediaSource = null;
+    const constraints = {
+        video: true,
+        audio: false
+    }
 
     const appContext = {
         connected: false,
@@ -136,11 +136,6 @@ window.addEventListener("load", evt => {
     btnConnect.addEventListener('click', evt => connect());
     btnDisconnect.addEventListener('click', evt => disconnect());
     btnSend.addEventListener('click', evt => send());
-
-    var constraints = {
-        video: true,
-        audio: false
-    }
 
     function connect() {
         var socket = new SockJS(SERVER_URL);
@@ -287,7 +282,7 @@ window.addEventListener("load", evt => {
     }
 
     function showMsg(chatMsg) {
-        document.querySelector('.chat-history').innerHTML += '<div class="col-sm-2 col-lg-12 col-md-12">'+createMessageCard(chatMsg)+'</div>';
+        document.querySelector('.chat-history').insertAdjacentHTML('beforeend', '<div class="col-sm-2 col-lg-12 col-md-12">'+createMessageCard(chatMsg)+'</div>');
     }
 
     function createMessageCard(chatMsg) {
