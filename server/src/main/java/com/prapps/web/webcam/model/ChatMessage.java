@@ -1,20 +1,18 @@
 package com.prapps.web.webcam.model;
 
-public class ChatMessage {
+public class ChatMessage extends AbstractMessage {
     private MessageType type;
     private String content;
-    private String sender;
-    private String time;
+
     private int messageNumber;
     private int partNumber;
     private int partCount;
-    private String sessionId;
 
     public ChatMessage() {
     }
 
     public ChatMessage(MessageType messageType) {
-        this.type = type;
+        this.type = messageType;
     }
 
     public MessageType getType() {
@@ -31,22 +29,6 @@ public class ChatMessage {
 
     public void setContent(String content) {
         this.content = content;
-    }
-
-    public String getSender() {
-        return sender;
-    }
-
-    public void setSender(String sender) {
-        this.sender = sender;
-    }
-
-    public String getTime() {
-        return time;
-    }
-
-    public void setTime(String time) {
-        this.time = time;
     }
 
     @Override
@@ -86,11 +68,5 @@ public class ChatMessage {
         this.partCount = partCount;
     }
 
-    public String getSessionId() {
-        return sessionId;
-    }
 
-    public void setSessionId(String sessionId) {
-        this.sessionId = sessionId;
-    }
 }
