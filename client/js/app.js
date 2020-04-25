@@ -3,10 +3,11 @@ window.addEventListener("load", evt => {
 });
 
 (function() {
-    const SERVER_URL = 'http://192.168.0.108:8090/web-conference';
-    const REST_URL = 'http://192.168.0.108:8090/rest/';
+    const SERVER_URL = 'https://192.168.0.108:9443/web-conference';
+    const REST_URL = 'https://192.168.0.108:9443/rest/';
     const TOPIC_NAME = '/topic/public';
     const VIDEO_TOPIC = '/topic/video';
+    const MY_SESSION_ID = "Me";
     var stompClient = null;
     const sender = document.querySelector("#name");
     const content = document.querySelector("#content");
@@ -18,8 +19,9 @@ window.addEventListener("load", evt => {
     const btnStopVideo = document.querySelector("#stopVideo");
     const constraints = {
         video: true,
-        audio: false
+        audio: true
     }
+    const mimeCodec = "video/webm;codecs=opus,vp8";
 
     const appContext = {
         connected: false,
@@ -27,13 +29,14 @@ window.addEventListener("load", evt => {
         video_users: [],
         users: new Object()
     };
-    const mimeCodec = "video/webm; codecs=vp8";
 
     function attachMediaSource(videoElem, sessionId) {
         const mediaSource = new MediaSource();
         appContext.users[sessionId].mediaSource = mediaSource;
         var mediaSourceBuffer;
+        console.log(mimeCodec+" supported ? "+MediaSource.isTypeSupported(mimeCodec));
         mediaSource.addEventListener('sourceopen', evt => {
+            console.log("source opened "+sessionId)
             const sourceBuffer = mediaSource.addSourceBuffer(mimeCodec);
             appContext.users[sessionId].sourceBuffer = sourceBuffer;
             /*appContext.users[sessionId].chunks.forEach(chunkBlob => {
@@ -41,35 +44,52 @@ window.addEventListener("load", evt => {
             });*/
             if(appContext.users[sessionId].chunks) {
                 appContext.users[sessionId].chunks[0].arrayBuffer()
-                .then(data => sourceBuffer.appendBuffer(data));
+                .then(data => {
+                    sourceBuffer.appendBuffer(data);
+                });
             }
         }, false);
-        mediaSource.addEventListener('sourceclose', evt => console.log("source closed "+sessionId));
-        mediaSource.addEventListener('sourceended', evt => console.log("source ended "+sessionId));
+        mediaSource.addEventListener('sourceclose', evt => console.log("source closed"));
+        mediaSource.addEventListener('sourceended', evt => {
+            console.log("source ended");
+            removePanel(sessionId);
+        });
         videoElem.src = URL.createObjectURL(mediaSource);
         videoElem.play().then(evt => {
             console.log("playing "+this);
             //var arrayBuffer = b64ToBlob(videoMsg.content.split(",")[1]);
             //appContext.users[videoMsg.sessionId].sourceBuffer.appendBuffer(arrayBuffer);
-        }).catch(err => console.log("error while playing "+sessionId));
+        }).catch(err => {console.log("error while playing "+sessionId+" "+err); console.trace();});
         return mediaSource;
     }
 
-    function startRecording() {
-        var stream = appContext.myVideo.mozCaptureStream ? appContext.myVideo.mozCaptureStream() : appContext.myVideo.captureStream();
+    function startRecording(aStream) {
+        //var stream = appContext.myVideo.mozCaptureStream ? appContext.myVideo.mozCaptureStream() : appContext.myVideo.captureStream();
         var recordedChunks = [];
-        mediaRecorder = new MediaRecorder(stream, { mimeType: mimeCodec });
-        mediaRecorder.ondataavailable = function(event) {
+        
+        /* testing locally */
+        //appContext.users["test"] ={};
+        //var otherVideo = document.querySelector("#videoImg_2");
+        //attachMediaSource(otherVideo, "test");
+        /* testing locally ends */
+
+        mediaRecorder = new MediaRecorder(aStream, { mimeType: mimeCodec });
+        mediaRecorder.addEventListener('dataavailable', event => {
             if (event.data.size > 0) {
-                blobToBase64(event.data, function(base64) {
-                    //var blob = b64ToBlob(base64);
-                    //blob.arrayBuffer().then(data => appContext.users["test"].sourceBuffer.appendBuffer(data));
-                    if (appContext.connected) {
-                        stompClient.send("/app/binary", {}, base64);
-                    }
-                });
+                if (appContext.connected) {
+                    blobToBase64(event.data, base64 => stompClient.send("/app/binary", {}, base64));
+                } else {
+                    //local testing
+                    /* if (appContext.users["test"].mediaSource.readyState == "open") {
+                        event.data.arrayBuffer().then(data => appContext.users["test"].sourceBuffer.appendBuffer(data));
+                    }*/
+                }
             }
-        };
+        });
+        mediaRecorder.addEventListener('stop', evt => {
+            console.log("mediarecorder stop")
+            removePanel(MY_SESSION_ID)
+        });
         appContext.mediaRecorder = mediaRecorder;
         mediaRecorder.start(1000);
         return true;
@@ -78,13 +98,15 @@ window.addEventListener("load", evt => {
     btnStartVideo.addEventListener('click', evt => {
         navigator.getUserMedia = navigator.getUserMedia || navigator.webkitGetUserMedia || navigator.mozGetUserMedia || navigator.msGetUserMedia;
         navigator.mediaDevices.getUserMedia(constraints).then(stream => {
+            appContext.recordingStatus = startRecording(stream);
             appContext.myVideoStream = stream;
-            document.querySelector('.videoContainer').insertAdjacentHTML('afterbegin',createVideoWindow("Me", "Me"));
+            document.querySelector('.videoContainer').insertAdjacentHTML('afterbegin',createVideoWindow(MY_SESSION_ID, MY_SESSION_ID));
             const myVideo = document.querySelector('.videoContainer video[id="videoImg_Me"]');
+            //const myVideo = document.querySelector('#videoImg_0');
             myVideo.addEventListener('playing', evt => {
                 console.log("playing "+evt.target.id)
                 if(evt.target.id == appContext.myVideo.id && !appContext.recordingStatus) {
-                    appContext.recordingStatus = startRecording();
+                    appContext.recordingStatus = startRecording(stream);
                 }
             });
             myVideo.addEventListener('pause', evt => {
@@ -119,7 +141,7 @@ window.addEventListener("load", evt => {
             track.stop();
         });
         appContext.myVideo.pause();
-        document.querySelector("#serverCard_Me").parentElement.remove();
+        //document.querySelector("#serverCard_Me").parentElement.remove();
         btnStopVideo.classList.remove('d-block');
         btnStopVideo.classList.add('d-none');
         btnStartVideo.classList.remove('d-none');
@@ -173,8 +195,8 @@ window.addEventListener("load", evt => {
                         appContext.users[chatMsg.sessionId].mediaSource.endOfStream();    
                     }
                     
-                    document.querySelector('#serverCard_'+chatMsg.sessionId).parentNode.remove();
-                    delete appContext.users[chatMsg.sessionId].videoImg;
+                    //document.querySelector('#serverCard_'+chatMsg.sessionId).parentNode.remove();
+                    //delete appContext.users[chatMsg.sessionId].videoImg;
                     console.log("video user disconnected."+chatMsg.sessionId);
                 } else if(chatMsg.type == "CHAT") {
                     showMsg(chatMsg);
@@ -200,6 +222,7 @@ window.addEventListener("load", evt => {
                     appContext.users[videoMsg.sessionId].chunks.push(b64ToBlob(videoMsg.content));
                     document.querySelector('.videoContainer').insertAdjacentHTML('beforeend', createVideoWindow(videoMsg.sessionId, videoMsg.sender));
                     const videoImg = document.querySelector('#videoImg_'+videoMsg.sessionId);
+                    //const videoImg = getVideoWindow();
                     appContext.users[videoMsg.sessionId].videoImg = videoImg;
                     attachMediaSource(videoImg, videoMsg.sessionId);
                 });
@@ -209,22 +232,27 @@ window.addEventListener("load", evt => {
             console.log("recreate video layout ");
             document.querySelector('.videoContainer').insertAdjacentHTML('beforeend', createVideoWindow(videoMsg.sessionId, videoMsg.sender));
             const videoImg = document.querySelector('#videoImg_'+videoMsg.sessionId);
+            //const videoImg = getVideoWindow();
             appContext.users[videoMsg.sessionId].videoImg = videoImg;
             attachMediaSource(videoImg, videoMsg.sessionId);
             return;
         } else {
-            console.log("video contd.. ");
+            //console.log(videoMsg);
             const videoImg = appContext.users[videoMsg.sessionId].videoImg;//document.querySelector('#videoImg_'+videoMsg.sessionId);
             if (!videoImg)
                 return;
     
-            
-            var blob = b64ToBlob(videoMsg.content);
-            blob.arrayBuffer().then(data => {
-                if (appContext.users[videoMsg.sessionId]) {//make sure other user has not closed the video
-                    appContext.users[videoMsg.sessionId].sourceBuffer.appendBuffer(data);
-                }
-            });
+            if (appContext.users[videoMsg.sessionId].mediaSource.readyState == "open") {
+                
+                var blob = b64ToBlob(videoMsg.content);
+                blob.arrayBuffer().then(data => {
+                    if (appContext.users[videoMsg.sessionId]) {//make sure other user has not closed the video
+                        appContext.users[videoMsg.sessionId].sourceBuffer.appendBuffer(data);
+                    }
+                });
+            } else {
+                console.log("mediasource not open, discarding")
+            }
         }
 
 
@@ -298,6 +326,11 @@ window.addEventListener("load", evt => {
       </div>`;
     }
 
+    function getVideoWindow() {
+        const index = Object.keys(appContext.users).length;
+        return document.querySelector('#videoImg_'+index);
+    }
+
     function createVideoWindow(sessionId, username) {
         return `
         <div class="col-xs-12 col-sm-12 col-md-4 col-lg-4">
@@ -307,10 +340,14 @@ window.addEventListener("load", evt => {
                 </div>
                 <div class="card-body">
                     <span class="text-right text-muted float-right"></span>
-                    <video id="videoImg_${sessionId}" ></video>
+                    <video id="videoImg_${sessionId}" autoplay></video>
                 </div>
         </div>
       </div>`;
+    }
+
+    function removePanel(sessionId) {
+        document.querySelector(`#serverCard_${sessionId}`).remove();
     }
 
 })();

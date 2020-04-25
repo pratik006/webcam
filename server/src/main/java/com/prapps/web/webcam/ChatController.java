@@ -39,7 +39,7 @@ public class ChatController {
     @MessageMapping("/binary")
     @SendTo("/topic/video")
     public VideoMessage sendBlob(byte[] buf, SimpMessageHeaderAccessor headerAccessor) {
-        LOG.info("videoMessage:" + new String(buf).length());
+        LOG.trace("videoMessage:" + new String(buf).length());
         VideoMessage videoMessage = new VideoMessage();
         videoMessage.setTime(LocalDateTime.now().toString());
         videoMessage.setSessionId(headerAccessor.getSessionId());
