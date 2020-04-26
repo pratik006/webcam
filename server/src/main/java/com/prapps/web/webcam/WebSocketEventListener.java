@@ -2,7 +2,6 @@ package com.prapps.web.webcam;
 
 import com.prapps.web.webcam.model.ChatMessage;
 import com.prapps.web.webcam.model.MessageType;
-import com.prapps.web.webcam.model.VideoMessage;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;

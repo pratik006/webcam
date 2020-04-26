@@ -10,8 +10,10 @@ server:
   port: 9443
 
 
-logging.level.org.springframework:
-  web:
-    #servlet: DEBUG
-    socket.messaging: ERROR
-  messaging: ERROR
+logging.level:
+  com.prapps: DEBUG
+  org.springframework:
+    web:
+      #servlet: DEBUG
+      socket.messaging: ERROR
+    messaging: ERROR
