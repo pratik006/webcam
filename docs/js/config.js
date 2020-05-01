@@ -1,5 +1,5 @@
 export class Config {
-    SERVER_ROOT = "https://192.168.0.108:9443";//".";
+    SERVER_ROOT = ".";//"https://192.168.0.108:9443";
     SERVER_URL = this.SERVER_ROOT + '/web-conference';
     REST_URL = this.SERVER_ROOT + '/rest/';
     mediaRecorder = {
