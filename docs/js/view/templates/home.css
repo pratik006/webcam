@@ -1,0 +1,13 @@
+@charset "UFT-8";
+
+video, canvas, img{
+    /* width: 400px;
+    height: 400px; */
+    max-width: 100%;
+    height: auto;
+    background-color: #000;
+}
+
+body {
+  font-size: 22px;
+}
