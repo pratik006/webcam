@@ -1,0 +1,34 @@
+<div class="row mt-10 ">
+    <div class="col-xs-12 col-sm-12 col-md-12">{{username}}
+    </div>
+</div>
+<div class="row mt-10 ">    
+    <div class="col-xs-12 col-sm-12 col-md-12">
+        <button id="startVideo"><i class="fas fa-video"></i></button>
+        <button id="stopVideo" class="d-none"><i class="fas fa-stop"></i></button>
+    </div>
+</div>
+<div class="row mt-10 videoContainer">
+    
+</div>
+
+
+<div class="form-group row mt-5">
+    <div class="col-xs-12 col-sm-12 col-md-12">
+        <button id="connect" class="btn btn-default" type="submit">Connect</button>
+        <button id="disconnect" class="btn btn-default" type="submit" disabled="disabled">Disconnect</button>
+    </div>
+    <div class="col-xs-12 col-sm-12 col-md-12">
+        <input type="text" id="content" class="form-control" placeholder="message...">
+        <button id="send" class="btn btn-default" type="button">Send</button>
+    </div>
+</div>
+<div class="row mt-5">
+    <div class="col-sm-2 col-lg-12 col-md-12">Messages</div>
+</div>
+<div class="row mt-5 chat-history"></div>
+<div class="row mt-100">
+    <div class="col-xs-12 col-sm-12 col-md-12">
+        <video id="otherVideo" autoplay hidden></video>
+    </div>
+</div>
